@@ -181,7 +181,7 @@ Este proyecto es también un experimento sobre los límites de lo que puede hace
 
 Se usaron prompts de ingeniería inversa para pedirle a la IA que reconstruyera simulaciones inspiradas en videos de este tipo. Después vino lo importante: estudiar críticamente lo que generaba, corregirlo, ampliarlo, pedir nuevas funciones, ajustar presets, mejorar la interfaz, añadir exportación de video y volver a probar. La IA escribió mucho; el criterio físico, la lectura, la corrección y la decisión sobre qué conservar y qué descartar siguieron siendo humanos.
 
-> Yo soy solo el mono detrás de la máquina de escribir que, por suerte del infinito, escribió el Quijote; salvo que no he escrito el Quijote, ni he escrito el código del programa. Pelear por la mano de la amada Dulcinea nos da fuerza para seguir batallando con esos gigantes que parecen molinos de viento, ¿no es cierto, Sancho?
+> Yo soy solo el mono detrás de la máquina de escribir que, por suerte del infinito, escribió el Quijote; salvo que no he escrito el Quijote, ni he escrito el código del programa. Que como buen quijote perisuge molinos de viento esperando el favor de Dulcinea, ¿no es cierto, Sancho?.
 
 La invitación final es simple: exploren la IA con responsabilidad, pero sin miedo.
 
