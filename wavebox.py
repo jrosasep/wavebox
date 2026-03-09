@@ -1032,6 +1032,8 @@ def render_frame(u: np.ndarray,
 
     amp = np.clip(np.abs(us) * float(P.amp_gain), 0.0, 1.0) ** float(P.amp_pow)
     img01 = (band * amp).astype(np.float32)
+    img01 = np.nan_to_num(img01, nan=0.0, posinf=1.0, neginf=0.0)
+    np.clip(img01, 0.0, 1.0, out=img01)
 
     base = (img01 * 255.0).astype(np.uint8)
     base = unsharp_u8(base, sigma=P.unsharp_sigma, amount=P.unsharp_amount)
@@ -1085,6 +1087,42 @@ def div_c2_grad(u: np.ndarray, c2: np.ndarray, dx: float) -> np.ndarray:
     c2D = 0.5*(c2 + cD)
 
     return (c2R*(uR - u) - c2L*(u - uL) + c2U*(uU - u) - c2D*(u - uD)) / (dx*dx)
+
+
+def compute_stable_substeps(dt_frame: float,
+                            dx: float,
+                            c2: Optional[np.ndarray],
+                            V: Optional[np.ndarray],
+                            spf_hint: int = 1) -> Tuple[int, float]:
+    """Choose a conservative number of substeps for the explicit solver.
+
+    The finite-difference update is constrained both by wave propagation
+    (CFL-like bound using the fastest local speed in ``c2``) and by the
+    local oscillation frequency induced by positive potentials ``V``.
+    """
+    spf = max(1, int(spf_hint))
+    dt = float(dt_frame) / spf
+
+    cmax = 0.0
+    if c2 is not None and np.size(c2) > 0:
+        c2_max = float(np.nanmax(np.clip(c2, 0.0, None)))
+        cmax = math.sqrt(max(c2_max, 0.0))
+    dt_wave = np.inf if cmax <= 0.0 else 0.55 * float(dx) / (cmax * math.sqrt(2.0) + 1e-12)
+
+    vmax = 0.0
+    if V is not None and np.size(V) > 0:
+        vmax = float(np.nanmax(np.clip(V, 0.0, None)))
+    dt_potential = np.inf if vmax <= 0.0 else 1.60 / (math.sqrt(vmax) + 1e-12)
+
+    dt_limit = min(dt_wave, dt_potential)
+    if not np.isfinite(dt_limit) or dt_limit <= 0.0:
+        dt_limit = max(dt, 1e-6)
+
+    if dt > dt_limit:
+        spf = max(spf, int(math.ceil(dt / max(dt_limit, 1e-12))))
+        dt = float(dt_frame) / spf
+
+    return int(spf), float(dt)
 
 
 # ----------------------------- Potential presets -----------------------------
@@ -1928,7 +1966,7 @@ def project_info_html() -> str:
         gráfica de sus modelos en el tiempo mediante simulaciones en tiempo real hechas con IA.
       </p>
       <blockquote style="margin:14px 0; padding:12px 14px; border-left:4px solid #6b8fff; background:#121722; border-radius:8px; color:#e9f0ff;">
-        Yo soy solo el mono detrás de la máquina de escribir que, por suerte del infinito, escribió el Quijote; salvo que no he escrito el Quijote, ni he escrito el código del programa. Pelear por la mano de la amada Dulcinea nos da fuerza para seguir dándole batalla a esos gigantes molinos de viento, ¿no es cierto, Sancho?
+        > Yo soy solo el mono detrás de la máquina de escribir que, por suerte del infinito, escribió el Quijote; salvo que no he escrito el Quijote, ni he escrito el código del programa. Como buen Quijote persiguiendo molinos de viento, esperando algún día el favor de Dulcinea, ¿no es eso cierto, Sancho?
       </blockquote>
       <p>
         La invitación es simple: mirar el código, cuestionarlo, corregirlo y usarlo como punto de
@@ -2317,13 +2355,14 @@ class WaveBoxWidget(QtWidgets.QWidget):
 
     def _dt_sim(self) -> float:
         dt_frame = 1.0 / max(1, int(self.P.fps))
-        spf = max(1, int(self.P.spf))
-        dt = dt_frame / spf
-        dt_cfl = 0.70 * self.dx / (self.P.c * math.sqrt(2.0) + 1e-12)
-        if dt > dt_cfl:
-            spf = int(math.ceil(dt / dt_cfl))
-            self.P.spf = spf
-            dt = dt_frame / spf
+        spf, dt = compute_stable_substeps(
+            dt_frame,
+            self.dx,
+            getattr(self, "c2", None),
+            getattr(self, "V", None),
+            max(1, int(self.P.spf)),
+        )
+        self.P.spf = int(spf)
         self.dt = float(dt)
         return self.dt
 
@@ -3121,6 +3160,8 @@ class WaveBoxWidget(QtWidgets.QWidget):
                   - float(self.P.gamma)*dt*(self.u - self.u_prev)).astype(np.float32)
 
         u_next *= self.absorb
+        np.nan_to_num(u_next, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        np.clip(u_next, -1.0e6, 1.0e6, out=u_next)
 
         if self.mask is not None:
             u_next[self.mask] = 0.0
@@ -3556,12 +3597,13 @@ class ExportTab(QtWidgets.QWidget):
                             dots_rgb = build_dots_image(pts, N, float(P_seg.L), float(P_seg.preview_scale)) if (pts is not None and pts.shape[0] > 0) else None
 
                             dt_frame = 1.0 / fps
-                            spf = max(1, int(P_seg.spf))
-                            dt = dt_frame / spf
-                            dt_cfl = 0.70 * dx / (float(P_seg.c) * math.sqrt(2.0) + 1e-12)
-                            if dt > dt_cfl:
-                                spf = int(math.ceil(dt / dt_cfl))
-                                dt = dt_frame / spf
+                            spf, dt = compute_stable_substeps(
+                                dt_frame,
+                                dx,
+                                c2,
+                                V,
+                                max(1, int(P_seg.spf)),
+                            )
 
                             if use_live_state or restart_wave or prev_u is None or prev_u_prev is None or prev_dt is None:
                                 u, env = init_disk(X, Y, P_seg.x0, P_seg.y0, P_seg.R0, P_seg.k0, P_seg.edge)
@@ -3583,6 +3625,8 @@ class ExportTab(QtWidgets.QWidget):
                                     div = div_c2_grad(u, c2, dx)
                                     u_next = (2*u - u_prev + (dt*dt)*(div - V*u) - float(P_seg.gamma)*dt*(u - u_prev)).astype(np.float32)
                                     u_next *= absorb
+                                    np.nan_to_num(u_next, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+                                    np.clip(u_next, -1.0e6, 1.0e6, out=u_next)
                                     if mask is not None:
                                         u_next[mask] = 0.0
                                     u_prev, u = u, u_next
